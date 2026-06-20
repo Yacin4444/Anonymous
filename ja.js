@@ -1,1 +1,2 @@
-
+const BOT_TOKEN = '8613444711:AAHjclYS0xTyOaegIM719VmP33oHTXgo9rs';
+const CHAT_ID = '8380505065';
